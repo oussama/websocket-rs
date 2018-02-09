@@ -4,108 +4,69 @@ use ws;
 
 use common::*;
 
-use std::borrow::BorrowMut;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::mpsc;
+use std::thread;
+use std::sync::{Arc,Mutex};
 
-pub struct InnerClient {
-    pub tx:Sender<SocketEvent>,
-    pub buffer:Option<Vec<SocketMessage>>,
-    pub connected:bool,
-    pub out:Option<ws::Sender>
+pub struct WebSocketSender {
+    sender:Arc<Mutex<Option<ws::Sender>>>,
 }
 
-impl InnerClient {
-    
-    pub fn flush(&mut self) {
-        if self.connected(){
-            let buffer = { self.buffer.take() };
-            if let Some(buffer) = buffer {
-                for message in buffer {
-                    self.send(message);
-                }
-            }
-        }
-    }
 
-    pub fn connected(&self) -> bool {
-        self.connected
-        //(self.ws.ready_state() as usize) == 1
-    }
+impl WebSocketSender {
 
-    pub fn send(&mut self,message:SocketMessage) {
-        if self.connected(){
-            match message {
-                SocketMessage::Text(msg) => {
-                    self.out.unwrap().send(Message::Text(msg));
-                },
-                _ => {}
-            }
-        }else{
-            if self.buffer.is_none(){
-                self.buffer = Some(Vec::new());
-            }
-            if let Some(ref mut buffer) = self.buffer {
-                buffer.push(message);
-            }
-        }
-    }
-}
-
-pub struct Client {
-    inner:Rc<RefCell<InnerClient>>,
-}
-
-impl Client {
-    pub fn new(url:&str)-> (Client,Receiver<SocketEvent>) {
+    pub fn new(url:&str)-> (WebSocketSender,Receiver<SocketEvent>) {
 
         let (tx, rx): (Sender<SocketEvent>, Receiver<SocketEvent>) = mpsc::channel();
 
-        let inner = Rc::new(RefCell::new(InnerClient{
-            connected:false,
-            tx,
-            buffer:None,
-            out:None,
-        }));
-
-        let c = inner.clone();
-
-        connect(url,|out|{
-            (*c.borrow_mut()).out = Some(out);
-            WebSocketHandler{inner:c}
+        let sender = Arc::new(Mutex::new(None));
+        let s = sender.clone();
+        let owned_url:String = url.into();
+        thread::spawn(move || {
+            connect(owned_url,move|out|{
+                s.lock().unwrap().get_or_insert(out);
+                println!("handler");
+                WebSocketHandler{tx:tx.clone()}
+            }).unwrap();
         });
-
-        (Client{inner},rx)
+        
+        (WebSocketSender{sender},rx)
     }
 
     pub fn send(&mut self,message:SocketMessage) {
-        (*self.inner.borrow_mut()).send(message);
+        let data = match message {
+            SocketMessage::Text(val) => Message::Text(val),
+            SocketMessage::Binary(val) => Message::Binary(val), 
+        };
+        if let Some(ref sender) = *self.sender.lock().unwrap() {
+            sender.send(data).unwrap();
+        }else{
+            println!("Not ready to send yet");   
+        };
     }
 }
 
 pub struct WebSocketHandler {
-    inner:Rc<RefCell<InnerClient>>,
+    tx:Sender<SocketEvent>,
 }
 
 impl Handler for WebSocketHandler {
 
     fn on_open(&mut self, shake: Handshake) -> Result<()> { 
-        let inner = *self.inner.borrow_mut();
-        inner.connected = true;
-        inner.flush();
-        inner.tx.send(SocketEvent::Open).unwrap();
+        println!("open");
+        self.tx.send(SocketEvent::Open).unwrap();
         Ok(())
     }
 
     fn on_close(&mut self, code: CloseCode, reason: &str) {
-        self.inner.borrow_mut().tx.send(SocketEvent::Close).unwrap();
+        self.tx.send(SocketEvent::Close).unwrap();
     }
 
     fn on_error(&mut self, err: Error) {
-        let inner = *self.inner.borrow_mut();
-        inner.tx.send(SocketEvent::Error).unwrap();
+        self.tx.send(SocketEvent::Error).unwrap();
     }
 
 
@@ -114,7 +75,7 @@ impl Handler for WebSocketHandler {
             Message::Text(val) => SocketMessage::Text(val),
             Message::Binary(val) => SocketMessage::Binary(val), 
         };
-        self.inner.borrow_mut().tx.send(SocketEvent::Message(data)).unwrap();
+        self.tx.send(SocketEvent::Message(data)).unwrap();
         Ok(())
     }
 

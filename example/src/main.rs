@@ -12,14 +12,22 @@ fn main() {
     let config = AppConfig::new("Test", size);
     let app = App::new(config);
 
-    let (mut client,rx) = Client::new("wss://echo.websocket.org");
+    let (mut sender,rx) = WebSocketSender::new("ws://echo.websocket.org");
 
-    client.send(SocketMessage::Text("hello".into()));
+    
 
     app.run(move |_t:&mut App| {
-        for msg in rx.try_iter(){
-            let j = serde_json::to_string(&msg).unwrap();
+        for ev in rx.try_iter(){
+            let j = serde_json::to_string(&ev).unwrap();
             log(&j);
+            match ev {
+                SocketEvent::Open => {
+                    sender.send(SocketMessage::Text("hello".into()));
+                },
+                _ =>{
+
+                }
+            }
         }
         //println!("{}",sources.len());
     });
