@@ -12,9 +12,7 @@ fn main() {
     let config = AppConfig::new("Test", size);
     let app = App::new(config);
 
-    let (mut sender,rx) = WebSocketSender::new("ws://echo.websocket.org");
-
-    
+    let (mut sender,rx) = WebSocketSender::new("ws://localhost:5012");
 
     app.run(move |_t:&mut App| {
         for ev in rx.try_iter(){
