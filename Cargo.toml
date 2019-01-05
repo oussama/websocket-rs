@@ -13,4 +13,4 @@ web-sys = { version = "0.3" , features = ["WebSocket","MessageEvent"] }
 wasm-bindgen = { version = "0.2", features = ["serde-serialize"]  }
 
 
-failure = "*"
+failure = "0.1.5"
