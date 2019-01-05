@@ -1,4 +1,4 @@
-use common::*;
+use crate::common::*;
 use serde::Serialize;
 
 use std::sync::mpsc;
@@ -10,13 +10,20 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::*;
 
+use failure::Error;
 use std::fmt;
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
+
 pub struct WebSocketSender {
-    ws: WebSocket,
+    pub ws: WebSocket,
     onopen: Closure<Fn(JsValue)>,
     onclose: Closure<FnMut()>,
-    onerror: Closure<FnMut()>,
+    onerror: Closure<FnMut(JsValue)>,
     onmessage: Closure<FnMut(MessageEvent)>,
 }
 
@@ -33,21 +40,22 @@ impl WebSocketSender {
         let ws = WebSocket::new(url).unwrap();
 
         let sender = tx.clone();
-        let onopen = Closure::wrap(Box::new(move |ev: JsValue| {
+        let onopen = Closure::wrap(Box::new(move |_ev: JsValue| {
             sender.send(SocketEvent::Open).unwrap();
         }) as Box<Fn(JsValue)>);
 
         let sender = tx.clone();
-        let onerror = Closure::wrap(Box::new(move || {
+        let onerror = Closure::wrap(Box::new(move |err: JsValue| {
+            use serde_json::Value;
+            let v: Value = err.into_serde().unwrap();
+            log(&format!("wserr {:?}", v));
             sender.send(SocketEvent::Error).unwrap();
-        }) as Box<FnMut()>);
-        ws.set_onerror(Some(&onerror.as_ref().unchecked_ref()));
+        }) as Box<FnMut(JsValue)>);
 
         let sender = tx.clone();
         let onclose = Closure::wrap(Box::new(move || {
             sender.send(SocketEvent::Close).unwrap();
         }) as Box<FnMut()>);
-        ws.set_onclose(Some(&onclose.as_ref().unchecked_ref()));
 
         let sender = tx.clone();
         let onmessage = Closure::wrap(Box::new(move |event: MessageEvent| {
@@ -55,7 +63,7 @@ impl WebSocketSender {
                 let data = SocketMessage::Text(text);
                 sender.send(SocketEvent::Message(data)).unwrap();
             } else {
-                println!("MESSAGE NOT STRING");
+                log("MESSAGE NOT STRING");
             }
             /* if let Some(blob) = event.data().into_blob() {
                 let s2 = sender.clone();
@@ -79,7 +87,6 @@ impl WebSocketSender {
                 sender.send(SocketEvent::Message(data)).unwrap();
             }*/
         }) as Box<FnMut(MessageEvent)>);
-        ws.set_onmessage(Some(&onmessage.as_ref().unchecked_ref()));
         let wss = WebSocketSender {
             onopen,
             onerror,
@@ -88,23 +95,34 @@ impl WebSocketSender {
             ws,
         };
         wss.ws
+            .set_onmessage(Some(&wss.onmessage.as_ref().unchecked_ref()));
+        wss.ws
             .set_onopen(Some(&wss.onopen.as_ref().unchecked_ref()));
+        wss.ws
+            .set_onerror(Some(&wss.onerror.as_ref().unchecked_ref()));
+        wss.ws
+            .set_onclose(Some(&wss.onclose.as_ref().unchecked_ref()));
+
         (wss, rx)
     }
 
-    pub fn send(&mut self, message: SocketMessage) {
+    pub fn send(&mut self, message: SocketMessage) -> Result<(), Error> {
         match message {
-            SocketMessage::Text(msg) => {
-                self.ws.send_with_str(&msg);
-            }
-            SocketMessage::Binary(mut bytes) => {
-                self.ws.send_with_u8_array(&mut bytes);
-            }
+            SocketMessage::Text(msg) => self
+                .ws
+                .send_with_str(&msg)
+                .map_err(|err| failure::err_msg(format!("{:?}", err))),
+            SocketMessage::Binary(mut bytes) => self
+                .ws
+                .send_with_u8_array(&mut bytes)
+                .map_err(|err| failure::err_msg(format!("{:?}", err))),
         }
     }
 
-    pub fn send_text<T: Serialize>(&mut self, msg: T) {
+    pub fn send_text<T: Serialize>(&mut self, msg: T) -> Result<(), Error> {
         let encoded = serde_json::to_string(&msg).expect("Failed to encode message");
-        self.ws.send_with_str(&encoded);
+        self.ws
+            .send_with_str(&encoded)
+            .map_err(|err| failure::err_msg(format!("{:?}", err)))
     }
 }

@@ -2,12 +2,15 @@
 name = "websocket"
 version = "0.1.0"
 authors = ["Oussama <md.oussama@gmail.com>"]
+edition = "2018"
 
 [dependencies]
 serde = "1.0"
-serde_derive = "1.0"
 serde_json = "1.0"
-
+serde_derive = "1.0"
 
 web-sys = { version = "0.3" , features = ["WebSocket","MessageEvent"] }
-wasm-bindgen = { version = "0.2"  }
+wasm-bindgen = { version = "0.2", features = ["serde-serialize"]  }
+
+
+failure = "*"

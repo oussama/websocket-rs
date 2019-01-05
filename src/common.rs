@@ -1,5 +1,4 @@
-
-#[derive(Debug,Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SocketEvent {
     Open,
     Close,
@@ -7,7 +6,7 @@ pub enum SocketEvent {
     Message(SocketMessage),
 }
 
-#[derive(Debug,Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SocketMessage {
     Text(String),
     Binary(Vec<u8>),
